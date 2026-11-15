@@ -57,3 +57,17 @@ gunicorn -w 1 --threads 8 -b 0.0.0.0:5000 'app:create_app()'
 - 通过 HTTPS 访问时设置 `SESSION_COOKIE_SECURE=1`。
 
 ## 法律与许可
+
+### 上游项目
+本项目是 [deepseek-ai/chat-demo](https://github.com/deepseek-ai/chat-demo) 的衍生作品。
+- **上游许可证**：MIT License
+- **上游版权声明**：`Copyright (c) DeepSeek`
+- 上游项目的 MIT 许可证全文已保留在本仓库`public/`目录下的 [`LICENSE`](public/LICENSE) 文件中。
+
+### 本衍生作品的新增部分
+本衍生作品的新增部分（包括但不限于 Flask 后端、SQLite 集成等）同样以 **MIT License** 发布。
+- **本项目版权声明**：`Copyright (c) 2026 Tydecent`
+- 上述新增部分的 MIT 许可声明已合并写入根目录的 [`LICENSE`](LICENSE) 文件。
+
+### 分发说明
+根据上游 MIT 许可证的要求，分发本项目的任何副本或实质部分时，必须一并保留 [`LICENSE`](LICENSE) 文件中的原始版权声明和许可声明[reference:0]。第三方依赖遵循各自的许可证。

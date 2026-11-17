@@ -55,9 +55,6 @@ class LoginRateLimiter:
 
 
 def client_key() -> str:
-    forwarded = request.headers.get("X-Forwarded-For", "")
-    if forwarded:
-        return forwarded.split(",")[0].strip()
     return request.remote_addr or "unknown"
 
 

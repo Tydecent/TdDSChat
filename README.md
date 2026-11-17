@@ -53,7 +53,7 @@ gunicorn -w 1 --threads 8 -b 0.0.0.0:5000 'app:create_app()'
 ```
 
 - 必须 `-w 1`：SQLite 与内存态登录限流都是单进程假设。
-- 反向代理需关闭对 `/api/proxy/` 的响应缓冲（nginx: `proxy_buffering off;`），否则流式回复会被攒包。
+- 反向代理需关闭对 `/api/proxy/` 的响应缓冲（nginx: `proxy_buffering off;`），否则流式回复会被攒包。我们也推荐您在反代中配置限速设置。
 - 通过 HTTPS 访问时设置 `SESSION_COOKIE_SECURE=1`。
 
 ## 法律与许可

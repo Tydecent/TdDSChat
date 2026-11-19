@@ -10,6 +10,7 @@
 from __future__ import annotations
 
 import json
+import os
 import sqlite3
 import time
 from contextlib import contextmanager
@@ -57,6 +58,21 @@ CREATE TABLE IF NOT EXISTS files (
     created_at INTEGER NOT NULL
 );
 """
+
+
+def referenced_file_ids(sessions: list[Any]) -> set[str]:
+    """汇总若干 Session 中被用户消息引用的附件 id。"""
+    referenced: set[str] = set()
+    for session in sessions:
+        if not isinstance(session, dict):
+            continue
+        for message in session.get("messages") or []:
+            if not isinstance(message, dict) or message.get("role") != "user":
+                continue
+            for file in message.get("files") or []:
+                if isinstance(file, dict) and isinstance(file.get("id"), str):
+                    referenced.add(file["id"])
+    return referenced
 
 
 class Database:
@@ -232,29 +248,43 @@ class Database:
         return True
 
     def delete_conversation(self, conversation_id: str) -> bool:
-        with self.transaction() as conn:
-            cursor = conn.execute("DELETE FROM conversations WHERE id = ?", (conversation_id,))
-        return cursor.rowcount > 0
+        """删除会话，并清理**仅被该会话引用**的附件原件。
 
-    def purge_unreferenced_files(self) -> int:
-        """清理已无任何会话引用的附件（删除会话后调用），返回清理数量。"""
+        不能顺手清理"所有无引用附件"：用户刚上传、还没发出去的原件同样处于
+        "无引用"状态，那样会被连坐删除，之后 file_id 失效时无法补传。
+        """
+        with self.transaction() as conn:
+            row = conn.execute(
+                "SELECT payload FROM conversations WHERE id = ?", (conversation_id,)
+            ).fetchone()
+            cursor = conn.execute("DELETE FROM conversations WHERE id = ?", (conversation_id,))
+        if cursor.rowcount <= 0 or row is None:
+            return False
+        try:
+            payload = json.loads(row["payload"])
+        except ValueError:
+            return True
+        self.purge_unreferenced_files(only=referenced_file_ids([payload]))
+        return True
+
+    def purge_unreferenced_files(self, only: set[str] | None = None) -> int:
+        """清理已无任何会话引用的附件，返回清理数量。
+
+        `only` 为候选集合：只在这些 id 里挑孤儿，避免误删别处刚上传的原件。
+        """
         with self.session() as conn:
             rows = conn.execute("SELECT payload FROM conversations").fetchall()
             existing = {row["id"] for row in conn.execute("SELECT id FROM files").fetchall()}
-        referenced: set[str] = set()
+        sessions = []
         for row in rows:
             try:
-                session = json.loads(row["payload"])
+                sessions.append(json.loads(row["payload"]))
             except ValueError:
                 continue
-            for message in session.get("messages") or []:
-                if not isinstance(message, dict) or message.get("role") != "user":
-                    continue
-                for file in message.get("files") or []:
-                    if isinstance(file, dict) and isinstance(file.get("id"), str):
-                        referenced.add(file["id"])
-        orphans = sorted(existing - referenced)
-        for file_id in orphans:
+        orphans = existing - referenced_file_ids(sessions)
+        if only is not None:
+            orphans &= only
+        for file_id in sorted(orphans):
             self.delete_file(file_id)
         return len(orphans)
 
@@ -286,15 +316,7 @@ class Database:
 
     def _collect_orphan_files(self, conn: sqlite3.Connection, sessions: list[dict[str, Any]]) -> list[str]:
         """删除已无任何会话引用的附件行，返回需要从磁盘移除的 id。"""
-        referenced: set[str] = set()
-        for session in sessions:
-            for message in session.get("messages") or []:
-                if message.get("role") != "user":
-                    continue
-                for file in message.get("files") or []:
-                    file_id = file.get("id")
-                    if isinstance(file_id, str):
-                        referenced.add(file_id)
+        referenced = referenced_file_ids(sessions)
 
         existing = {row["id"] for row in conn.execute("SELECT id FROM files").fetchall()}
         orphans = sorted(existing - referenced)
@@ -309,7 +331,13 @@ class Database:
 
     def put_file(self, file_id: str, data: bytes, name: str, mime_type: str) -> None:
         path = self.file_path(file_id)
-        path.write_bytes(data)
+        # 先写临时文件再原子替换：并发 GET 不会读到写了一半的原件
+        tmp_path = path.with_name(f".{path.name}.{time.time_ns()}.tmp")
+        try:
+            tmp_path.write_bytes(data)
+            os.replace(tmp_path, path)
+        finally:
+            tmp_path.unlink(missing_ok=True)
         with self.transaction() as conn:
             conn.execute(
                 """

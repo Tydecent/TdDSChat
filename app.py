@@ -75,7 +75,11 @@ def create_app(config_object: type[Config] = Config) -> Flask:
     @app.errorhandler(413)
     def _too_large(_error):
         limit = current_app.config["MAX_CONTENT_LENGTH"] // (1024 * 1024)
-        return jsonify({"error": "too_large", "message": f"请求体超过 {limit} MB 上限"}), 413
+        message = f"请求体超过 {limit} MB 上限"
+        if request.path.startswith("/api/proxy/"):
+            # 前端按 Anthropic 的错误结构取文案，超限时不该把整段 JSON 抛到 toast 上
+            return jsonify({"error": {"type": "too_large", "message": message}}), 413
+        return jsonify({"error": "too_large", "message": message}), 413
 
     @app.errorhandler(404)
     def _not_found(_error):

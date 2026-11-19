@@ -106,10 +106,8 @@ def save_conversation(conversation_id: str):
 @bp.delete("/<conversation_id>")
 @login_required
 def delete_conversation(conversation_id: str):
-    database = _database()
-    database.delete_conversation(conversation_id)
-    # 与原 deleteSession 保持一致：会话删除后清理不再被引用的附件原件
-    database.purge_unreferenced_files()
+    # 删除会话并由数据层清理「只被该会话引用」的原件
+    _database().delete_conversation(conversation_id)
     # 删除是幂等的：会话不存在也返回 204
     return "", 204
 

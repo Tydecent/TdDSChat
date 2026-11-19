@@ -72,25 +72,20 @@ def forward(path: str):
         headers[lowered] = value
     headers.setdefault("accept", "*/*")
 
-    files = None
-    data = None
-    if request.mimetype.startswith("multipart/form-data"):
-        files = {
-            field: (item.filename or field, item.stream, item.mimetype or "application/octet-stream")
-            for field, item in request.files.items()
-        }
-        # purpose 必须先于 file 编码，交给 requests 的 data 字段（字典有序）
-        data = request.form.to_dict(flat=True)
-    elif request.method in {"POST", "PUT", "PATCH"}:
-        data = request.get_data(cache=False)
+    # 请求体必须原样透传，绝不能让 requests 重新编码 multipart：
+    # 一旦把 request.files / request.form 交给 requests.files，它会用自己的新 boundary
+    # 重新拼 body，而 Content-Type 头仍带着客户端原来的 boundary，上游（DeepSeek）
+    # 按错误的 boundary 切分必然解析失败，所有文件上传 / 语音 ASR 都会 400。
+    body = None
+    if request.method in {"POST", "PUT", "PATCH"}:
+        body = request.get_data(cache=True)
 
     try:
         upstream = requests.request(
             request.method,
             url,
             headers=headers,
-            data=data,
-            files=files,
+            data=body,
             stream=True,
             timeout=(config["UPSTREAM_CONNECT_TIMEOUT"], config["UPSTREAM_READ_TIMEOUT"]),
             allow_redirects=False,
